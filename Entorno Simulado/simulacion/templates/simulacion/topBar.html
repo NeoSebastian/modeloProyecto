@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Entorno Simulado{% endblock %}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        .topbar {
+            background-color: #2776f5;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .topbar a {
+            color: white;
+            text-decoration: none;
+            padding: 10px 15px;
+            font-size: 16px;
+        }
+        .topbar a:hover {
+            background-color: #488DFA;
+            border-radius: 4px;
+        }
+        .topbar a.disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+            pointer-events: auto; /* Permite hover para mostrar tooltip */
+        }
+        .topbar a.disabled:hover::after {
+            content: "Primero hay que generar embeddings de nuevos emprendimientos recién agregados en la pestaña Simulación";
+            position: absolute;
+            background-color: #333;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 10;
+            width: 200px;
+            text-align: center;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .topbar .title {
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .topbar .nav-links {
+            display: flex;
+            gap: 10px;
+        }
+        .content {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+        @media (max-width: 768px) {
+            .topbar {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .topbar .nav-links {
+                flex-direction: column;
+                width: 100%;
+                margin-top: 10px;
+            }
+            .topbar a {
+                display: block;
+                padding: 10px;
+            }
+            .topbar a.disabled:hover::after {
+                width: 150px;
+                left: 10px;
+                transform: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <a href="{% url 'simulacion:home' %}" class="title">Entorno Simulado</a>
+        <div class="nav-links">
+            <a href="{% url 'simulacion:lista_emprendimientos' %}">Emprendimientos</a>
+            <a href="{% url 'simulacion:simulacion' %}">Simulación</a>
+            <a href="{% url 'simulacion:predicciones' %}" id="predicciones-link">Predicciones</a>
+            <a href="{% url 'simulacion:evaluacion' %}">Evaluación</a>
+        </div>
+    </div>
+    <div class="content">
+        {% block content %}
+        {% endblock %}
+    </div>
+
+    <script>
+        // Verificar si hay emprendimientos sin embeddings al cargar la página
+        document.addEventListener('DOMContentLoaded', function() {
+            const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
+            fetch('/simulacion/check_missing_embeddings/', {
+                method: 'GET',
+                headers: {
+                    'X-CSRFToken': csrftoken
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                const prediccionesLink = document.getElementById('predicciones-link');
+                if (!data.all_embeddings_exist) {
+                    prediccionesLink.classList.add('disabled');
+                    prediccionesLink.onclick = function(e) {
+                        e.preventDefault();
+                        return false;
+                    };
+                }
+            })
+            .catch(error => {
+                console.error('Error checking embeddings:', error);
+            });
+        });
+    </script>
+</body>
+</html>

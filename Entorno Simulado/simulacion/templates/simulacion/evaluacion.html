@@ -1,0 +1,1005 @@
+{% extends 'simulacion/topBar.html' %}
+{% load static %}
+{% load django_bootstrap5 %}
+{% block title %}Entorno Simulado - Evaluación{% endblock %}
+
+{% block content %}
+<!-- Carga explícita de Bootstrap CSS y JS para asegurar estilos y modales -->
+{% bootstrap_css %}
+{% bootstrap_javascript %}
+
+<div class="container-fluid py-5 bg-light min-vh-100">
+  <!-- Header Section -->
+  <div class="mb-5">
+    <div class="d-flex flex-wrap align-items-center gap-3 border-bottom pb-3">
+      <h1 class="display-6 fw-bold text-primary me-auto">Dashboard de Evaluación</h1>
+      <div class="input-group" style="max-width: 550px;">
+        <span class="input-group-text bg-primary text-white border-0">
+          <i class="bi bi-cpu me-2"></i>Modelo
+        </span>
+        <select id="model-select" class="form-select border-primary">
+          {% for mf in model_files %}
+            <option value="{{ mf }}" {% if mf == default_model %}selected{% endif %}>{{ mf }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-primary" id="reload-btn">
+          <i class="bi bi-arrow-repeat me-2"></i>Cargar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loader -->
+  <div id="loader" class="alert alert-info d-none shadow-sm rounded-pill mx-auto" style="max-width: 500px;" role="alert">
+    <i class="bi bi-hourglass-split me-2"></i>Cargando métricas y gráficas…
+  </div>
+
+  <!-- Metrics and Controls Section -->
+  <div class="row g-4 mb-5">
+    <div class="col-12 col-xl-4">
+      <div class="card shadow-lg border-0 h-100">
+        <div class="card-header bg-primary text-white">
+          <h5 class="card-title mb-0">Métricas (umbral: <span id="threshold-label" class="badge bg-light text-dark">0.50</span>)</h5>
+        </div>
+        <div class="card-body">
+          <table class="table table-sm table-hover" id="metrics-table">
+            <thead class="table-light">
+              <tr>
+                <th scope="col">Métrica</th>
+                <th scope="col" class="text-end">Valor</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Precision</td><td data-k="precision" class="text-end">—</td></tr>
+              <tr><td>Recall</td><td data-k="recall" class="text-end">—</td></tr>
+              <tr><td>F1-Score</td><td data-k="f1" class="text-end">—</td></tr>
+              <tr><td>AUC-ROC</td><td data-k="auc" class="text-end">—</td></tr>
+              <tr><td>Average Precision</td><td data-k="ap" class="text-end">—</td></tr>
+              <tr><td>Accuracy</td><td data-k="accuracy" class="text-end">—</td></tr>
+            </tbody>
+          </table>
+          <div class="mt-4">
+            <label class="form-label fw-semibold">Umbral de predicción</label>
+            <div class="d-flex align-items-center gap-3">
+              <input type="range" min="0" max="1" step="0.01" value="0.5" id="threshold-slider" class="form-range">
+              <button class="btn btn-primary btn-sm" id="btn-recalc">
+                <i class="bi bi-calculator me-2"></i>Recalcular
+              </button>
+            </div>
+          </div>
+          <div class="d-flex gap-3 mt-4">
+            <button class="btn btn-outline-primary btn-sm w-100" id="btn-export-metrics">
+              <i class="bi bi-file-earmark-arrow-down me-2"></i>Exportar CSV Métricas
+            </button>
+            <button class="btn btn-outline-primary btn-sm w-100" id="btn-export-errors">
+              <i class="bi bi-file-earmark-arrow-down me-2"></i>Exportar CSV Errores
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ROC, PR, F1 y Loss Section -->
+    <div class="col-12 col-xl-8">
+      <div class="card shadow-lg border-0 h-100">
+        <div class="card-header bg-primary text-white">
+          <h5 class="card-title mb-0">Curvas ROC, Precision-Recall, F1-Score y Pérdida</h5>
+        </div>
+        <div class="card-body">
+          <div class="row g-4">
+            <div class="col-12 col-md-6">
+              <div class="border rounded p-3 bg-white shadow-sm position-relative" style="cursor: pointer;" data-bs-toggle="modal" data-bs-target="#rocModal">
+                <canvas id="chart-roc" style="max-height: 400px;"></canvas>
+                <div class="position-absolute top-0 end-0 p-2 d-flex gap-2">
+                  <i class="bi bi-fullscreen text-muted" title="Ver en pantalla completa"></i>
+                  <button class="btn btn-sm btn-outline-primary export-png" data-chart="chart-roc" title="Exportar a PNG"><i class="bi bi-image"></i></button>
+                </div>
+              </div>
+            </div>
+            <div class="col-12 col-md-6">
+              <div class="border rounded p-3 bg-white shadow-sm position-relative" style="cursor: pointer;" data-bs-toggle="modal" data-bs-target="#prModal">
+                <canvas id="chart-pr" style="max-height: 400px;"></canvas>
+                <div class="position-absolute top-0 end-0 p-2 d-flex gap-2">
+                  <i class="bi bi-fullscreen text-muted" title="Ver en pantalla completa"></i>
+                  <button class="btn btn-sm btn-outline-primary export-png" data-chart="chart-pr" title="Exportar a PNG"><i class="bi bi-image"></i></button>
+                </div>
+              </div>
+            </div>
+            <div class="col-12 col-md-6">
+              <div class="border rounded p-3 bg-white shadow-sm position-relative" style="cursor: pointer;" data-bs-toggle="modal" data-bs-target="#f1Modal">
+                <canvas id="chart-f1" style="max-height: 400px;"></canvas>
+                <div class="position-absolute top-0 end-0 p-2 d-flex gap-2">
+                  <i class="bi bi-fullscreen text-muted" title="Ver en pantalla completa"></i>
+                  <button class="btn btn-sm btn-outline-primary export-png" data-chart="chart-f1" title="Exportar a PNG"><i class="bi bi-image"></i></button>
+                </div>
+              </div>
+            </div>
+            <div class="col-12 col-md-6">
+              <div class="border rounded p-3 bg-white shadow-sm position-relative" style="cursor: pointer;" data-bs-toggle="modal" data-bs-target="#lossModal">
+                <canvas id="chart-loss" style="max-height: 400px;"></canvas>
+                <div class="position-absolute top-0 end-0 p-2 d-flex gap-2">
+                  <i class="bi bi-fullscreen text-muted" title="Ver en pantalla completa"></i>
+                  <button class="btn btn-sm btn-outline-primary export-png" data-chart="chart-loss" title="Exportar a PNG"><i class="bi bi-image"></i></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Histogram Section -->
+  <div class="row g-4 mb-5">
+    <div class="col-12">
+      <div class="card shadow-lg border-0 h-100">
+        <div class="card-header bg-primary text-white">
+          <h5 class="card-title mb-0">Distribución de Predicciones</h5>
+        </div>
+        <div class="card-body">
+          <div class="border rounded p-3 bg-white shadow-sm position-relative">
+            <canvas id="chart-hist" style="max-height: 400px;"></canvas>
+            <div class="position-absolute top-0 end-0 p-2 d-flex gap-2">
+              <button class="btn btn-sm btn-outline-primary export-png" data-chart="chart-hist" title="Exportar a PNG"><i class="bi bi-image"></i></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Errors and Graph Section -->
+  <div class="row g-4 mb-5">
+    <div class="col-12">
+      <div class="card shadow-lg border-0">
+        <div class="card-header bg-primary text-white">
+          <h5 class="card-title mb-0">Errores Comunes (FP/FN) & Mini-Grafo</h5>
+        </div>
+        <div class="card-body">
+          <div class="row g-4">
+            <div class="col-12 col-lg-6 d-flex">
+              <div class="table-responsive border rounded bg-white shadow-sm flex-grow-1" style="max-height: 300px; overflow-y: auto;">
+                <table class="table table-sm table-striped mb-0">
+                  <thead class="table-light sticky-top">
+                    <tr>
+                      <th scope="col">#</th>
+                      <th scope="col">Tipo</th>
+                      <th scope="col">Score</th>
+                      <th scope="col">y_true</th>
+                      <th scope="col">u</th>
+                      <th scope="col">v</th>
+                    </tr>
+                  </thead>
+                  <tbody id="errors-body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="col-12 col-lg-6 d-flex">
+              <div id="error-graph" class="border rounded bg-white shadow-sm flex-grow-1" style="width: 100%; height: 400px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Model Comparison Section -->
+  <div class="row g-4">
+    <div class="col-12">
+      <div class="card shadow-lg border-0">
+        <div class="card-header bg-primary text-white">
+          <h5 class="card-title mb-0">Comparación vs. otro modelo</h5>
+        </div>
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-3 mb-4" style="max-width: 550px;">
+            <span class="fw-semibold text-dark">Comparar con:</span>
+            <select id="compare-select" class="form-select border-primary">
+              <option value="">— Selecciona un modelo —</option>
+              {% for mf in model_files %}
+                <option value="{{ mf }}">{{ mf }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="border rounded p-3 bg-white shadow-sm position-relative" style="cursor: pointer;" data-bs-toggle="modal" data-bs-target="#radarModal">
+            <canvas id="chart-radar" style="max-height: 400px;"></canvas>
+            <div class="position-absolute top-0 end-0 p-2 d-flex gap-2">
+              <i class="bi bi-fullscreen text-muted" title="Ver en pantalla completa"></i>
+              <button class="btn btn-sm btn-outline-primary export-png" data-chart="chart-radar" title="Exportar a PNG"><i class="bi bi-image"></i></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal para Curva ROC -->
+  <div class="modal fade" id="rocModal" tabindex="-1" aria-labelledby="rocModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content">
+        <div class="modal-header bg-primary text-white">
+          <h5 class="modal-title" id="rocModalLabel">Curva ROC</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <canvas id="chart-roc-modal" style="max-height: 600px; width: 100%;"></canvas>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline-primary export-png" data-chart="chart-roc-modal" title="Exportar a PNG"><i class="bi bi-image"></i> PNG</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal para Curva Precision-Recall -->
+  <div class="modal fade" id="prModal" tabindex="-1" aria-labelledby="prModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content">
+        <div class="modal-header bg-primary text-white">
+          <h5 class="modal-title" id="prModalLabel">Curva Precision-Recall</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <canvas id="chart-pr-modal" style="max-height: 600px; width: 100%;"></canvas>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline-primary export-png" data-chart="chart-pr-modal" title="Exportar a PNG"><i class="bi bi-image"></i> PNG</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal para Curva F1-Score -->
+  <div class="modal fade" id="f1Modal" tabindex="-1" aria-labelledby="f1ModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content">
+        <div class="modal-header bg-primary text-white">
+          <h5 class="modal-title" id="f1ModalLabel">Curva F1-Score</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <canvas id="chart-f1-modal" style="max-height: 600px; width: 100%;"></canvas>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline-primary export-png" data-chart="chart-f1-modal" title="Exportar a PNG"><i class="bi bi-image"></i> PNG</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal para Curva Pérdida de Entrenamiento -->
+  <div class="modal fade" id="lossModal" tabindex="-1" aria-labelledby="lossModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content">
+        <div class="modal-header bg-primary text-white">
+          <h5 class="modal-title" id="lossModalLabel">Pérdida de Entrenamiento</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <canvas id="chart-loss-modal" style="max-height: 600px; width: 100%;"></canvas>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline-primary export-png" data-chart="chart-loss-modal" title="Exportar a PNG"><i class="bi bi-image"></i> PNG</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal para Gráfico de Radar -->
+  <div class="modal fade" id="radarModal" tabindex="-1" aria-labelledby="radarModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content">
+        <div class="modal-header bg-primary text-white">
+          <h5 class="modal-title" id="radarModalLabel">Comparación de Modelos</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <canvas id="chart-radar-modal" style="max-height: 600px; width: 100%;"></canvas>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline-primary export-png" data-chart="chart-radar-modal" title="Exportar a PNG"><i class="bi bi-image"></i> PNG</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Librerías -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+
+<script>
+(() => {
+  // Registrar el plugin ChartDataLabels
+  if (typeof ChartDataLabels !== 'undefined') {
+    Chart.register(ChartDataLabels);
+  } else {
+    console.error('ChartDataLabels no está definido');
+  }
+
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => document.querySelectorAll(s);
+
+  // CSRF para POST
+  function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+  }
+  const csrftoken = getCookie('csrftoken');
+
+  const defaultModel = "{{ default_model }}";
+  const modelSelect = $("#model-select");
+  const compareSelect = $("#compare-select");
+  const loader = $("#loader");
+  const thresholdSlider = $("#threshold-slider");
+  const thresholdLabel = $("#threshold-label");
+
+  // Charts
+  let rocChart, prChart, f1Chart, lossChart, histChart, radarChart, radarModalChart;
+  let rocModalChart, prModalChart, f1ModalChart, lossModalChart;
+
+  // Mapa de charts para acceso fácil
+  const chartInstances = {
+    'chart-roc': () => rocChart,
+    'chart-pr': () => prChart,
+    'chart-f1': () => f1Chart,
+    'chart-loss': () => lossChart,
+    'chart-hist': () => histChart,
+    'chart-radar': () => radarChart,
+    'chart-roc-modal': () => rocModalChart,
+    'chart-pr-modal': () => prModalChart,
+    'chart-f1-modal': () => f1ModalChart,
+    'chart-loss-modal': () => lossModalChart,
+    'chart-radar-modal': () => radarModalChart
+  };
+
+  // Estado global actual
+  let CURRENT = {
+    model: defaultModel,
+    metrics: null,
+    hist: null,
+    errors: null,
+    roc: null,
+    pr: null,
+    f1_history: null,
+    loss_history: null,
+    radar_data: null // Almacenar datos del radar para el modal
+  };
+
+  function showLoader(flag) {
+    loader.classList.toggle("d-none", !flag);
+  }
+
+  function fmt(x) {
+    if (x === null || x === undefined || Number.isNaN(x)) return "—";
+    return Number(x).toFixed(4);
+  }
+
+  function fillMetricsTable(metrics) {
+    const tbl = $("#metrics-table");
+    ["precision","recall","f1","auc","ap","accuracy"].forEach(k => {
+      const td = tbl.querySelector(`[data-k="${k}"]`);
+      if (td) td.textContent = fmt(metrics[k]);
+    });
+  }
+
+  function drawROC(rocData, canvasId = "chart-roc") {
+    const ctx = $(`#${canvasId}`);
+    if (canvasId === "chart-roc" && rocChart) rocChart.destroy();
+    if (canvasId === "chart-roc-modal" && rocModalChart) rocModalChart.destroy();
+    const chart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: rocData.fpr,
+        datasets: [{
+          label: "ROC (TPR vs FPR)",
+          data: rocData.tpr,
+          borderColor: 'blue',
+          fill: false,
+          pointRadius: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { 
+            title: { display: true, text: "False Positive Rate", color: '#000000' },
+            min: 0, 
+            max: 1,
+            ticks: { color: '#000000' },
+            grid: { color: '#000000' },
+            border: { color: '#000000' }
+          },
+          y: { 
+            title: { display: true, text: "True Positive Rate", color: '#000000' },
+            min: 0, 
+            max: 1,
+            ticks: { color: '#000000' },
+            grid: { color: '#000000' },
+            border: { color: '#000000' }
+          }
+        },
+        plugins: {
+          legend: { 
+            display: true,
+            labels: { color: '#000000' }
+          }
+        }
+      }
+    });
+    if (canvasId === "chart-roc") rocChart = chart;
+    if (canvasId === "chart-roc-modal") rocModalChart = chart;
+    ctx.style.width = '100%';
+    ctx.style.height = canvasId === "chart-roc-modal" ? '600px' : '400px';
+  }
+
+  function drawPR(prData, canvasId = "chart-pr") {
+    const ctx = $(`#${canvasId}`);
+    if (canvasId === "chart-pr" && prChart) prChart.destroy();
+    if (canvasId === "chart-pr-modal" && prModalChart) prModalChart.destroy();
+    if (!prData.recall || !prData.precision || prData.recall.length === 0 || prData.precision.length === 0) {
+      console.warn("PR curve data is empty or invalid");
+      return;
+    }
+    const dataPoints = prData.recall.map((recall, i) => ({
+      x: recall,
+      y: prData.precision[i]
+    }));
+    const chart = new Chart(ctx, {
+      type: "line",
+      data: {
+        datasets: [{
+          label: "Precision-Recall",
+          data: dataPoints,
+          borderColor: 'green',
+          fill: false,
+          pointRadius: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        animation: false,
+        scales: {
+          x: { 
+            type: 'linear',
+            title: { display: true, text: "Recall", color: '#000000' },
+            min: 0,
+            max: 1,
+            ticks: { color: '#000000' },
+            grid: { color: '#000000' },
+            border: { color: '#000000' }
+          },
+          y: { 
+            title: { display: true, text: "Precision", color: '#000000' },
+            min: 0,
+            max: 1,
+            ticks: { color: '#000000' },
+            grid: { color: '#000000' },
+            border: { color: '#000000' }
+          }
+        },
+        plugins: { 
+          legend: { 
+            display: true,
+            labels: { color: '#000000' }
+          }
+        }
+      }
+    });
+    if (canvasId === "chart-pr") prChart = chart;
+    if (canvasId === "chart-pr-modal") prModalChart = chart;
+    ctx.style.width = '100%';
+    ctx.style.height = canvasId === "chart-pr-modal" ? '600px' : '400px';
+  }
+
+  function drawF1Score(f1Data, canvasId = "chart-f1") {
+    const ctx = $(`#${canvasId}`);
+    if (canvasId === "chart-f1" && f1Chart) f1Chart.destroy();
+    if (canvasId === "chart-f1-modal" && f1ModalChart) f1ModalChart.destroy();
+    if (!f1Data.epochs || !f1Data.values || f1Data.epochs.length === 0 || f1Data.values.length === 0) {
+      console.warn("F1-Score data is empty or invalid");
+      return;
+    }
+    const chart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: f1Data.epochs,
+        datasets: [{
+          label: "F1-Score",
+          data: f1Data.values,
+          borderColor: 'purple',
+          fill: false,
+          pointRadius: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { 
+            title: { display: true, text: "Época", color: '#000000' },
+            ticks: { color: '#000000' },
+            grid: { color: '#000000' },
+            border: { color: '#000000' }
+          },
+          y: { 
+            title: { display: true, text: "F1-Score", color: '#000000' },
+            min: 0, 
+            max: 1,
+            ticks: { color: '#000000' },
+            grid: { color: '#000000' },
+            border: { color: '#000000' }
+          }
+        },
+        plugins: { 
+          legend: { 
+            display: true,
+            labels: { color: '#000000' }
+          }
+        }
+      }
+    });
+    if (canvasId === "chart-f1") f1Chart = chart;
+    if (canvasId === "chart-f1-modal") f1ModalChart = chart;
+    ctx.style.width = '100%';
+    ctx.style.height = canvasId === "chart-f1-modal" ? '600px' : '400px';
+  }
+
+  function drawLoss(lossData, canvasId = "chart-loss") {
+    const ctx = $(`#${canvasId}`);
+    if (canvasId === "chart-loss" && lossChart) lossChart.destroy();
+    if (canvasId === "chart-loss-modal" && lossModalChart) lossModalChart.destroy();
+    if (!lossData || !lossData.epochs || !lossData.values || lossData.epochs.length === 0 || lossData.values.length === 0) {
+      console.warn("Loss data is empty or invalid");
+      return;
+    }
+    const chart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: lossData.epochs,
+        datasets: [{
+          label: "Pérdida de Entrenamiento",
+          data: lossData.values,
+          borderColor: 'red',
+          fill: false,
+          pointRadius: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        scales: {
+          x: { 
+            title: { display: true, text: "Época", color: '#000000' },
+            ticks: { color: '#000000' },
+            grid: { color: '#000000' },
+            border: { color: '#000000' }
+          },
+          y: { 
+            title: { display: true, text: "Loss", color: '#000000' },
+            beginAtZero: true,
+            ticks: { color: '#000000' },
+            grid: { color: '#000000' },
+            border: { color: '#000000' }
+          }
+        },
+        plugins: { 
+          legend: { 
+            display: true,
+            labels: { color: '#000000' }
+          }
+        }
+      }
+    });
+    if (canvasId === "chart-loss") lossChart = chart;
+    if (canvasId === "chart-loss-modal") lossModalChart = chart;
+    ctx.style.width = '100%';
+    ctx.style.height = canvasId === "chart-loss-modal" ? '600px' : '400px';
+  }
+
+  function drawHist(hist) {
+    const ctx = $("#chart-hist");
+    if (histChart) histChart.destroy();
+    histChart = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: hist.bin_centers.map(v => Number(v).toFixed(2)),
+        datasets: [{
+          label: "Frecuencia",
+          data: hist.counts,
+          backgroundColor: 'rgba(75, 192, 192, 0.6)',
+          borderColor: 'rgba(75, 192, 192, 1)',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        animation: false,
+        scales: {
+          x: { 
+            title: { display: true, text: "Probabilidad", color: '#000000' },
+            ticks: { color: '#000000' },
+            grid: { color: '#000000' },
+            border: { color: '#000000' }
+          },
+          y: { 
+            title: { display: true, text: "Frecuencia", color: '#000000' },
+            beginAtZero: true,
+            ticks: { color: '#000000' },
+            grid: { color: '#000000' },
+            border: { color: '#000000' }
+          }
+        },
+        plugins: { 
+          legend: { 
+            display: false
+          }
+        }
+      }
+    });
+    ctx.style.width = '100%';
+    ctx.style.height = '400px';
+  }
+
+  function drawRadar(data, canvasId = "chart-radar") {
+    const ctx = $(`#${canvasId}`);
+    if (canvasId === "chart-radar" && radarChart) radarChart.destroy();
+    if (canvasId === "chart-radar-modal" && radarModalChart) radarModalChart.destroy();
+
+    const labels = ["Precision", "Recall", "F1", "AUC", "AP", "Accuracy"];
+    const allValues = [...data.datasets[0].data, ...data.datasets[1].data];
+    const minValue = Math.min(...allValues.filter(v => v > 0)) * 0.95;
+    const maxValue = Math.max(...allValues) * 1.05;
+
+    const chart = new Chart(ctx, {
+      type: "radar",
+      data: {
+        labels,
+        datasets: data.datasets
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          r: {
+            min: minValue,
+            max: maxValue,
+            ticks: {
+              stepSize: (maxValue - minValue) / 5,
+              callback: (value) => value.toFixed(3),
+              color: '#000000'
+            },
+            grid: { color: '#000000' },
+            pointLabels: { color: '#000000', font: { size: 12 } },
+            angleLines: { color: '#000000' }
+          }
+        },
+        plugins: {
+          legend: { 
+            display: true,
+            labels: { color: '#000000' }
+          },
+          datalabels: {
+            color: '#000000',
+            formatter: (value) => value.toFixed(3),
+            font: { size: 12 },
+            anchor: 'end',
+            align: 'end',
+            offset: 8,
+            clamp: true
+          }
+        }
+      },
+      plugins: typeof ChartDataLabels !== 'undefined' ? [ChartDataLabels] : []
+    });
+
+    if (canvasId === "chart-radar") radarChart = chart;
+    if (canvasId === "chart-radar-modal") radarModalChart = chart;
+    ctx.style.width = '100%';
+    ctx.style.height = canvasId === "chart-radar-modal" ? '600px' : '400px';
+  }
+
+  function fillErrorsTable(errors) {
+    const body = $("#errors-body");
+    body.innerHTML = "";
+    let idx = 1;
+
+    function addRows(list) {
+      list.forEach(item => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${idx++}</td>
+          <td>${item.type}</td>
+          <td>${Number(item.score).toFixed(4)}</td>
+          <td>${item.y_true}</td>
+          <td>${item.u ?? "—"}</td>
+          <td>${item.v ?? "—"}</td>
+        `;
+        body.appendChild(tr);
+      });
+    }
+
+    addRows(errors.fp || []);
+    addRows(errors.fn || []);
+  }
+
+  function drawErrorGraph(errorGraph) {
+    const el = d3.select("#error-graph");
+    el.selectAll("*").remove();
+
+    const width = el.node().clientWidth;
+    const height = el.node().clientHeight;
+
+    const svg = el.append("svg")
+      .attr("width", width)
+      .attr("height", height);
+
+    const nodes = errorGraph.nodes || [];
+    const links = errorGraph.links || [];
+
+    const sim = d3.forceSimulation(nodes)
+      .force("link", d3.forceLink(links).id(d => d.id).distance(40).strength(0.9))
+      .force("charge", d3.forceManyBody().strength(-80))
+      .force("center", d3.forceCenter(width/2, height/2));
+
+    const link = svg.append("g")
+      .attr("stroke", "#bbb")
+      .attr("stroke-width", 1)
+      .selectAll("line")
+      .data(links)
+      .enter().append("line")
+      .attr("stroke", d => d.etype === "FP" ? "#e67e22" : "#e74c3c");
+
+    const node = svg.append("g")
+      .attr("stroke", "#fff")
+      .attr("stroke-width", 1.5)
+      .selectAll("circle")
+      .data(nodes)
+      .enter().append("circle")
+      .attr("r", 5)
+      .attr("fill", "#3498db")
+      .call(drag(sim));
+
+    node.append("title").text(d => `Nodo ${d.id}`);
+
+    sim.on("tick", () => {
+      link.attr("x1", d => d.source.x)
+          .attr("y1", d => d.source.y)
+          .attr("x2", d => d.target.x)
+          .attr("y2", d => d.target.y);
+
+      node.attr("cx", d => d.x)
+          .attr("cy", d => d.y);
+    });
+
+    function drag(simulation) {
+      function dragstarted(event, d) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+      }
+      function dragged(event, d) {
+        d.fx = event.x; d.fy = event.y;
+      }
+      function dragended(event, d) {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null; d.fy = null;
+      }
+      return d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended);
+    }
+  }
+
+  // Funciones de exportación
+  function exportToPNG(canvasId) {
+    const canvas = $(`#${canvasId}`);
+    if (!canvas) return alert("Gráfica no encontrada");
+    html2canvas(canvas, { 
+      backgroundColor: '#ffffff',
+      scale: 2 // Aumentar resolución para mejor calidad
+    }).then(canvas => {
+      const link = document.createElement('a');
+      link.href = canvas.toDataURL('image/png', 1.0); // Calidad máxima
+      link.download = `${canvasId}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }).catch(err => {
+      console.error('Error al exportar a PNG:', err);
+      alert('Error al exportar la gráfica a PNG');
+    });
+  }
+
+  async function fetchData(modelName) {
+    showLoader(true);
+    const url = new URL("{% url 'simulacion:evaluacion_data' %}", window.location.origin);
+    url.searchParams.set("model", modelName);
+    const res = await fetch(url.toString());
+    const data = await res.json();
+    showLoader(false);
+    if (data.status !== "ok") throw new Error(data.message || "Error");
+    return data;
+  }
+
+  function updateAll(data) {
+    CURRENT.model = data.model_name;
+    CURRENT.metrics = data.metrics;
+    CURRENT.hist = data.hist;
+    CURRENT.errors = { fp: data.errors.fp, fn: data.errors.fn };
+    CURRENT.roc = data.roc;
+    CURRENT.pr = data.pr;
+    CURRENT.f1_history = data.f1_history;
+    CURRENT.loss_history = data.loss_history;
+
+    thresholdLabel.textContent = Number(thresholdSlider.value).toFixed(2);
+
+    fillMetricsTable(data.metrics);
+    drawROC(data.roc);
+    drawPR(data.pr);
+    drawF1Score(data.f1_history);
+    drawLoss(data.loss_history);
+    drawHist(data.hist);
+    fillErrorsTable(data.errors);
+    drawErrorGraph(data.error_graph);
+  }
+
+  async function recalcThreshold() {
+    thresholdLabel.textContent = Number(thresholdSlider.value).toFixed(2);
+    showLoader(true);
+    const res = await fetch("{% url 'simulacion:recalculate_metrics' %}", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": csrftoken },
+      body: JSON.stringify({ threshold: Number(thresholdSlider.value), model: modelSelect.value })
+    });
+    showLoader(false);
+    const js = await res.json();
+    if (js.status !== "ok") {
+      alert(js.message || "Error al recalcular");
+      return;
+    }
+    fillMetricsTable(js.metrics);
+  }
+
+  async function compareModels() {
+    const other = compareSelect.value;
+    if (!other) {
+      if (radarChart) radarChart.destroy();
+      return;
+    }
+
+    const url = new URL("{% url 'simulacion:model_summary' %}", window.location.origin);
+    url.searchParams.set("model", other);
+    try {
+      const res = await fetch(url.toString());
+      const js = await res.json();
+      if (js.status !== "ok") {
+        alert(js.message || "No se pudo comparar");
+        return;
+      }
+
+      const m1 = CURRENT.metrics || {};
+      const m2 = js.metrics_05 || {};
+
+      const keys = ["precision", "recall", "f1", "auc", "ap", "accuracy"];
+      const d1 = keys.map(k => Number(m1[k] ?? 0));
+      const d2 = keys.map(k => Number(m2[k] ?? 0));
+
+      // Almacenar datos del radar para el modal
+      CURRENT.radar_data = {
+        datasets: [
+          { label: modelSelect.value, data: d1, borderColor: 'blue', backgroundColor: 'rgba(0, 0, 255, 0.1)' },
+          { label: js.model_name, data: d2, borderColor: 'red', backgroundColor: 'rgba(255, 0, 0, 0.1)' }
+        ]
+      };
+
+      drawRadar(CURRENT.radar_data);
+    } catch (error) {
+      console.error('Error en compareModels:', error);
+      alert('Error al renderizar el gráfico de comparación');
+    }
+  }
+
+  function exportCSV(filename, rows) {
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    a.remove(); URL.revokeObjectURL(url);
+  }
+
+  async function loadAndRender() {
+    try {
+      const data = await fetchData(modelSelect.value);
+      updateAll(data);
+      if (radarChart) radarChart.destroy();
+      compareSelect.value = "";
+      CURRENT.radar_data = null; // Limpiar datos del radar
+    } catch (e) {
+      showLoader(false);
+      alert(e.message || e);
+    }
+  }
+
+  // Redibujar gráficas en modales cuando se abren
+  $("#rocModal").addEventListener("shown.bs.modal", () => {
+    if (CURRENT.roc) drawROC(CURRENT.roc, "chart-roc-modal");
+  });
+
+  $("#prModal").addEventListener("shown.bs.modal", () => {
+    if (CURRENT.pr) drawPR(CURRENT.pr, "chart-pr-modal");
+  });
+
+  $("#f1Modal").addEventListener("shown.bs.modal", () => {
+    if (CURRENT.f1_history) drawF1Score(CURRENT.f1_history, "chart-f1-modal");
+  });
+
+  $("#lossModal").addEventListener("shown.bs.modal", () => {
+    if (CURRENT.loss_history) drawLoss(CURRENT.loss_history, "chart-loss-modal");
+  });
+
+  $("#radarModal").addEventListener("shown.bs.modal", () => {
+    if (CURRENT.radar_data) drawRadar(CURRENT.radar_data, "chart-radar-modal");
+  });
+
+  // Destruir gráficas de modales cuando se cierran para liberar memoria
+  $("#rocModal").addEventListener("hidden.bs.modal", () => {
+    if (rocModalChart) rocModalChart.destroy();
+  });
+
+  $("#prModal").addEventListener("hidden.bs.modal", () => {
+    if (prModalChart) prModalChart.destroy();
+  });
+
+  $("#f1Modal").addEventListener("hidden.bs.modal", () => {
+    if (f1ModalChart) f1ModalChart.destroy();
+  });
+
+  $("#lossModal").addEventListener("hidden.bs.modal", () => {
+    if (lossModalChart) lossModalChart.destroy();
+  });
+
+  $("#radarModal").addEventListener("hidden.bs.modal", () => {
+    if (radarModalChart) radarModalChart.destroy();
+  });
+
+  // Eventos para botones de exportación
+  $$('.export-png').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const canvasId = btn.getAttribute('data-chart');
+      exportToPNG(canvasId);
+    });
+  });
+
+  $("#btn-export-metrics").addEventListener("click", () => {
+    const m = CURRENT.metrics || {};
+    const rows = [["metric","value"]].concat(Object.entries(m).map(([k,v]) => [k, v]));
+    exportCSV(`metrics_${modelSelect.value}.csv`, rows);
+  });
+
+  $("#btn-export-errors").addEventListener("click", () => {
+    const errs = (CURRENT.errors?.fp || []).concat(CURRENT.errors?.fn || []);
+    const rows = [["idx","type","score","y_true","u","v"]];
+    errs.forEach(e => rows.push([e.idx, e.type, e.score, e.y_true, e.u ?? "", e.v ?? ""]));
+    exportCSV(`errors_${modelSelect.value}.csv`, rows);
+  });
+
+  $("#reload-btn").addEventListener("click", loadAndRender);
+  $("#btn-recalc").addEventListener("click", recalcThreshold);
+  compareSelect.addEventListener("change", compareModels);
+
+  // Inicial
+  loadAndRender();
+})();
+</script>
+{% endblock %}
